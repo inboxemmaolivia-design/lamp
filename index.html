@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>The Reading Lamp — an interactive study</title>
+<style>
+  :root{
+    --bg-cool:      #14161a;
+    --bg-warm:      #1f1811;
+    --ink:          #ece7de;
+    --ink-dim:      #8d8880;
+    --brass:        #b5895a;
+    --line:         rgba(236,231,222,0.14);
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--bg-cool);
+    overflow:hidden;
+    font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    color:var(--ink);
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+
+  #app{ position:fixed; inset:0; }
+  canvas#scene{ position:absolute; inset:0; display:block; touch-action:none; }
+  canvas#scene.grabbing{ cursor: grabbing; }
+  canvas#scene.hoverable{ cursor: pointer; }
+
+  /* ---------- top-left mark ---------- */
+  .mark{
+    position:fixed; top:28px; left:32px; z-index:20;
+    font-size:15px; letter-spacing:0.04em; color:var(--ink-dim);
+    font-family: 'Inter', system-ui, sans-serif; font-weight:400;
+    pointer-events:none;
+    opacity:0.85;
+  }
+  .mark b{ color:var(--ink); font-weight:500; }
+
+  /* ---------- status pill, bottom-right ---------- */
+  .status{
+    position:fixed; bottom:30px; right:32px; z-index:20;
+    display:flex; align-items:center; gap:10px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size:12.5px; letter-spacing:0.08em; color:var(--ink-dim);
+    pointer-events:none;
+    transition: color 0.6s ease;
+  }
+  .status .dot{
+    width:7px; height:7px; border-radius:50%;
+    background: #5b5b58;
+    box-shadow: 0 0 0 rgba(255,180,100,0);
+    transition: background 0.6s ease, box-shadow 0.6s ease;
+  }
+  .status.is-on .dot{
+    background: #ffb56b;
+    box-shadow: 0 0 10px 2px rgba(255,181,107,0.65);
+  }
+  .status.is-on{ color: #d8c6ac; }
+
+  /* ---------- pull hint ---------- */
+  .hint{
+    position:fixed; left:50%; bottom:58px; z-index:20;
+    transform: translateX(-50%);
+    font-size:19px; font-style:italic; color:var(--ink);
+    opacity:0; pointer-events:none;
+    transition: opacity 1.1s ease;
+    text-align:center;
+  }
+  .hint span{
+    display:block; font-family:'Inter',system-ui,sans-serif; font-style:normal;
+    font-size:11px; letter-spacing:0.14em; color:var(--ink-dim); margin-top:6px;
+  }
+  .hint.visible{ opacity:0.9; }
+  .hint.fading{ opacity:0; }
+
+  /* ---------- loading screen ---------- */
+  #loader{
+    position:fixed; inset:0; z-index:100;
+    background: var(--bg-cool);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    transition: opacity 1s ease;
+  }
+  #loader.hidden{ opacity:0; pointer-events:none; }
+  .loader-word{
+    font-size:15px; letter-spacing:0.28em; color:var(--ink-dim);
+    font-family:'Inter',system-ui,sans-serif; margin-bottom:22px;
+  }
+  .loader-pct{
+    font-size:44px; font-weight:300; color:var(--ink);
+    font-family:'Cormorant Garamond', serif; margin-bottom:20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .loader-track{
+    width:220px; height:1px; background:var(--line); position:relative; overflow:hidden;
+  }
+  .loader-fill{
+    position:absolute; left:0; top:0; bottom:0; width:0%;
+    background: var(--brass);
+    transition: width 0.25s ease-out;
+  }
+  .loader-caption{
+    margin-top:20px; font-size:13px; color:var(--ink-dim); font-style:italic;
+  }
+
+  #fatal{
+    position:fixed; inset:0; z-index:200; display:none;
+    background:var(--bg-cool); color:var(--ink);
+    align-items:center; justify-content:center; text-align:center; padding:40px;
+    font-family:'Inter',system-ui,sans-serif;
+  }
+  #fatal.show{ display:flex; }
+  #fatal p{ max-width:420px; line-height:1.6; font-size:14px; color:var(--ink-dim); }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;1,400&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <div class="mark">Study No. 4 &nbsp;—&nbsp; <b>the reading lamp</b></div>
+
+  <div class="status" id="status">
+    <span class="dot"></span>
+    <span id="statusText">light off</span>
+  </div>
+
+  <div class="hint" id="hint">
+    Pull the rope
+    <span>CLICK AND DRAG DOWNWARD</span>
+  </div>
+
+  <div id="loader">
+    <div class="loader-word">PREPARING THE ROOM</div>
+    <div class="loader-pct" id="loaderPct">0%</div>
+    <div class="loader-track"><div class="loader-fill" id="loaderFill"></div></div>
+    <div class="loader-caption" id="loaderCaption">building the lamp&hellip;</div>
+  </div>
+
+  <div id="fatal">
+    <p>This experience needs a browser with WebGL support. Please try a recent version of Chrome, Firefox, Safari or Edge.</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Import map: Three.js + addons + GSAP, all from CDN            -->
+<!-- ============================================================ -->
+<script async src="https://cdn.jsdelivr.net/npm/es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+/* =====================================================================================
+   THE READING LAMP — a cinematic interactive Three.js experience
+   -------------------------------------------------------------------------------------
+   Architecture (kept in one file for a self-contained deliverable, but organized into
+   the module-like sections a multi-file project would use):
+
+     • Utils              — small math + scratch-object helpers (no per-frame allocation)
+     • Renderer/Camera     — Phase 1
+     • Environment         — Phase 1 (walls, floor, procedural textures)
+     • Lamp                — Phase 1 (geometry + PBR materials)
+     • Rope                — Phase 2 (Verlet physics + hand-built tube mesh)
+     • Interaction         — Phase 2 (state machine, raycasting, pointer handling)
+     • LampAnimation       — Phase 3 (mechanical switch + cinematic ON/OFF light timeline)
+     • PostProcessing      — Phase 4 (bloom, vignette, color management)
+     • Audio               — Phase 3 (tiny synthesized click, no external files)
+     • Loop / Performance  — Phase 5 (resize, pixel ratio, mobile tuning, disposal)
+   ===================================================================================== */
+
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { gsap } from 'https://cdn.jsdelivr.net/npm/gsap@3.12.5/+esm';
+
+try {
+  main();
+} catch (err) {
+  console.error(err);
+  document.getElementById('loader').classList.add('hidden');
+  document.getElementById('fatal').classList.add('show');
+}
+
+function main(){
+
+/* ============================== 0. CONSTANTS / DEVICE ============================== */
+
+const IS_TOUCH   = matchMedia('(pointer: coarse)').matches;
+const IS_NARROW  = () => window.innerWidth < 760;
+const MAX_DPR    = 2;
+
+/* Scratch objects reused every frame — avoids allocation inside the animate loop. */
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _plane = new THREE.Plane();
+const _raycaster = new THREE.Raycaster();
+const _pointerNDC = new THREE.Vector2();
+const _color = new THREE.Color();
+
+/* ============================== 1. RENDERER / CAMERA / SCENE ======================== */
+
+const canvas = document.getElementById('scene');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha:false, powerPreference:'high-performance' });
+} catch (e) {
+  throw new Error('WebGL unavailable');
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const bgCool = new THREE.Color(0x14161a);
+const bgWarm = new THREE.Color(0x241a10);
+scene.background = bgCool.clone();
+scene.fog = new THREE.Fog(scene.background.getHex(), 6, 16);
+
+/* Metals (metalness ~0.9) render almost pure black under direct lights alone — they need
+   an environment to reflect. RoomEnvironment gives a soft, neutral studio IBL with no
+   external HDR file, so the stand/brass/socket read as real metal even at rest. */
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.035).texture;
+pmremGenerator.dispose();
+
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 50);
+const CAMERA_BASE_POS = new THREE.Vector3(1.15, 1.5, 4.35);
+const CAMERA_LOOK_AT  = new THREE.Vector3(0.05, 1.05, 0);
+camera.position.copy(CAMERA_BASE_POS);
+camera.lookAt(CAMERA_LOOK_AT);
+
+window.addEventListener('resize', onResize);
+function onResize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR));
+  renderer.setSize(w, h);
+  if (composer) composer.setSize(w, h);
+  applyDeviceQuality();
+}
+
+/* ============================== PROCEDURAL TEXTURE HELPERS =========================== */
+/* Generated at runtime on <canvas> — no network texture fetches, so the experience never
+   depends on external asset availability. */
+
+function makeCanvas(w, h, draw){
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  draw(ctx, w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+function makeDataTexture(w, h, draw){
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  draw(ctx, w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+
+function noiseFill(ctx, w, h, base, variance){
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = base + (Math.random() - 0.5) * variance;
+    img.data[i] = img.data[i+1] = img.data[i+2] = Math.max(0, Math.min(255, n));
+    img.data[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* Metal roughness map: subtle brushed variation + a few faint micro-scratches. */
+const metalRoughnessMap = makeDataTexture(256, 256, (ctx, w, h) => {
+  noiseFill(ctx, w, h, 130, 26);
+  ctx.globalAlpha = 0.12;
+  for (let i = 0; i < 40; i++){
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = Math.random() * 0.8 + 0.2;
+    const y = Math.random() * h;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y + (Math.random()-0.5) * 4);
+    ctx.stroke();
+  }
+});
+metalRoughnessMap.wrapS = metalRoughnessMap.wrapT = THREE.RepeatWrapping;
+metalRoughnessMap.repeat.set(2,4);
+
+/* Fabric normal map: light bump weave, generated as a subtle cross-hatch height field. */
+const fabricNormalMap = makeDataTexture(256, 256, (ctx, w, h) => {
+  ctx.fillStyle = '#8080ff'; ctx.fillRect(0,0,w,h);
+  ctx.globalAlpha = 0.10;
+  for (let x = 0; x < w; x += 3){
+    ctx.strokeStyle = Math.random() > 0.5 ? '#a0a0ff' : '#6060df';
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+  }
+  for (let y = 0; y < h; y += 3){
+    ctx.strokeStyle = Math.random() > 0.5 ? '#a0a0ff' : '#6060df';
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+  }
+});
+fabricNormalMap.wrapS = fabricNormalMap.wrapT = THREE.RepeatWrapping;
+fabricNormalMap.repeat.set(6,3);
+
+const fabricRoughnessMap = makeDataTexture(128,128,(ctx,w,h)=> noiseFill(ctx,w,h,205,20));
+fabricRoughnessMap.wrapS = fabricRoughnessMap.wrapT = THREE.RepeatWrapping;
+fabricRoughnessMap.repeat.set(6,3);
+
+/* Floor: matte, very subtle imperfection + a faint reflective clear-coat streaking. */
+const floorRoughnessMap = makeDataTexture(512,512,(ctx,w,h)=>{
+  noiseFill(ctx,w,h,150,14);
+  ctx.globalAlpha = 0.05;
+  for(let i=0;i<10;i++){
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(Math.random()*w, Math.random()*h, 80+Math.random()*140, 14+Math.random()*20, Math.random()*Math.PI, 0, Math.PI*2);
+    ctx.fill();
+  }
+});
+floorRoughnessMap.wrapS = floorRoughnessMap.wrapT = THREE.RepeatWrapping;
+floorRoughnessMap.repeat.set(3,3);
+
+/* Rope fiber texture: fine vertical striations for a braided-cord look. */
+const ropeColorMap = makeCanvas(64,256,(ctx,w,h)=>{
+  ctx.fillStyle = '#332c26'; ctx.fillRect(0,0,w,h);
+  for (let x=0;x<w;x++){
+    const shade = 40 + Math.random()*26;
+    ctx.strokeStyle = `rgb(${shade+18},${shade+12},${shade+6})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x + (Math.random()-0.5)*3, h); ctx.stroke();
+  }
+});
+ropeColorMap.wrapS = THREE.RepeatWrapping; ropeColorMap.wrapT = THREE.RepeatWrapping;
+ropeColorMap.repeat.set(1,6);
+
+/* ============================== 2. ENVIRONMENT (room shell) ========================== */
+
+const room = new THREE.Group();
+scene.add(room);
+
+const floorGeo = new THREE.CircleGeometry(9, 64);
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0x232120, roughness: 0.9, metalness: 0.05,
+  roughnessMap: floorRoughnessMap,
+});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+room.add(floor);
+
+const wallGeo = new THREE.PlaneGeometry(14, 7);
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x27262a, roughness: 0.95, metalness: 0.0 });
+const wall = new THREE.Mesh(wallGeo, wallMat);
+wall.position.set(0, 3.5, -2.6);
+wall.receiveShadow = true;
+room.add(wall);
+
+/* Subtle floor/wall intersection contact shadow line via a soft plane. */
+const skirtGeo = new THREE.PlaneGeometry(14, 0.35);
+const skirtMat = new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:0.18 });
+const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+skirt.position.set(0, 0.176, -2.58);
+room.add(skirt);
+
+/* A single quiet environmental object for scale + negative-space framing. */
+const sideTableGeo = new THREE.CylinderGeometry(0.26, 0.24, 0.42, 24);
+const sideTableMat = new THREE.MeshStandardMaterial({ color:0x2b2420, roughness:0.75, metalness:0.05 });
+const sideTable = new THREE.Mesh(sideTableGeo, sideTableMat);
+sideTable.position.set(-1.7, 0.21, -0.6);
+sideTable.castShadow = true; sideTable.receiveShadow = true;
+room.add(sideTable);
+
+/* ============================== 3. LAMP GEOMETRY ===================================== */
+/*
+   Lamp
+   ├── Base
+   ├── Vertical Stand
+   ├── Upper Arm / Neck
+   ├── Lampshade (outer / inner / bulb)
+   ├── Socket
+   └── Pull Switch (rope + handle)   — built in the Rope section (Phase 2)
+*/
+
+const lamp = new THREE.Group();
+lamp.position.set(0.55, 0, -0.35);
+scene.add(lamp);
+
+const metalMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2723, metalness: 0.88, roughness: 0.38,
+  roughnessMap: metalRoughnessMap,
+});
+const brassMat = new THREE.MeshStandardMaterial({
+  color: 0xb5895a, metalness: 0.95, roughness: 0.28,
+  roughnessMap: metalRoughnessMap,
+});
+
+/* --- Base + vertical stand + neck, built as one lathe profile for smooth, bevelled,
+       non-"crude-cylinder" geometry. Profile points are (radius, height). --- */
+function lathe(points, segments, material){
+  const pts = points.map(p => new THREE.Vector2(p[0], p[1]));
+  const geo = new THREE.LatheGeometry(pts, segments);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  return mesh;
+}
+
+const standProfile = [
+  [0.001, 0.000],
+  [0.220, 0.000],
+  [0.230, 0.012],
+  [0.230, 0.028],
+  [0.150, 0.050],
+  [0.070, 0.062],
+  [0.055, 0.062],
+  [0.050, 0.075],
+  [0.050, 1.260],
+  [0.058, 1.275],
+  [0.058, 1.300],
+  [0.042, 1.320],
+  [0.042, 1.360],
+  [0.070, 1.372],
+  [0.070, 1.386],
+  [0.020, 1.400],
+];
+const stand = lathe(standProfile, 48, metalMat);
+stand.position.y = 0;
+lamp.add(stand);
+
+/* thin brass banding rings at the neck joints, for the "seams / joints" requirement */
+function ring(y, r, h){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), brassMat);
+  m.position.y = y; m.castShadow = true;
+  return m;
+}
+lamp.add(ring(0.070, 0.058, 0.012));
+lamp.add(ring(1.288, 0.060, 0.010));
+
+/* --- Socket sitting atop the neck --- */
+const socketGeo = new THREE.CylinderGeometry(0.045, 0.052, 0.09, 24);
+const socket = new THREE.Mesh(socketGeo, metalMat);
+socket.position.y = 1.445;
+socket.castShadow = true;
+lamp.add(socket);
+
+/* --- Lampshade: outer (fabric) + inner (warm liner) shells as a tapered lathe frustum --- */
+const shadeOuterProfile = [
+  [0.30, 0.00],
+  [0.30, 0.02],
+  [0.205, 0.40],
+  [0.205, 0.42],
+];
+const fabricMat = new THREE.MeshPhysicalMaterial({
+  color: 0xd7c6a6,
+  roughness: 0.92, metalness: 0.0,
+  roughnessMap: fabricRoughnessMap,
+  normalMap: fabricNormalMap,
+  normalScale: new THREE.Vector2(0.35, 0.35),
+  side: THREE.DoubleSide,
+  sheen: 0.35,
+  sheenColor: new THREE.Color(0xf0e2c4),
+});
+const shadeOuter = lathe(shadeOuterProfile, 64, fabricMat);
+shadeOuter.position.y = 1.50;
+lamp.add(shadeOuter);
+
+const innerLinerMat = new THREE.MeshStandardMaterial({
+  color: 0xf4e6c8, roughness: 0.7, metalness: 0.0,
+  emissive: new THREE.Color(0x000000), emissiveIntensity: 0,
+  side: THREE.BackSide,
+});
+const shadeInner = lathe(shadeOuterProfile.map(p => [p[0]-0.012, p[1]]), 48, innerLinerMat);
+shadeInner.position.y = 1.50;
+shadeInner.castShadow = false;
+lamp.add(shadeInner);
+
+/* --- Bulb: custom Fresnel/emissive shader so it looks "hot" rather than a flat sphere --- */
+const bulbUniforms = {
+  uOn:        { value: 0.0 },     // 0..1 illumination driver
+  uColor:     { value: new THREE.Color(0xfff1d6) },
+  uHotColor:  { value: new THREE.Color(0xffcf8a) },
+};
+const bulbMat = new THREE.ShaderMaterial({
+  uniforms: bulbUniforms,
+  transparent: true,
+  depthWrite: true,
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main(){
+      vNormal = normalize(normalMatrix * normal);
+      vec4 mv = modelViewMatrix * vec4(position,1.0);
+      vViewDir = normalize(-mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }
+  `,
+  fragmentShader: `
+    uniform float uOn;
+    uniform vec3 uColor;
+    uniform vec3 uHotColor;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main(){
+      float fresnel = pow(1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0), 2.2);
+      vec3 base = mix(vec3(0.06,0.05,0.045), uColor, uOn);
+      vec3 hot  = uHotColor * fresnel * uOn * 1.4;
+      float glow = 0.35 + 0.65 * uOn;
+      vec3 col = base * glow + hot;
+      float alpha = mix(0.55, 1.0, uOn);
+      gl_FragColor = vec4(col, alpha);
+    }
+  `,
+});
+const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 24, 18), bulbMat);
+bulb.position.y = 1.53;
+lamp.add(bulb);
+
+/* Small filament suggestion inside the bulb (dark when off, bright thread when on). */
+const filamentMat = new THREE.MeshBasicMaterial({ color: 0x3a2c1c });
+const filament = new THREE.Mesh(new THREE.TorusKnotGeometry(0.012, 0.004, 40, 6, 2, 3), filamentMat);
+filament.position.y = 1.53;
+lamp.add(filament);
+
+/* ============================== 4. LIGHTING RIG (base layers) ======================== */
+/* Multiple coordinated layers, per spec §11. Intensities are animated in Phase 3. */
+
+const bulbLight = new THREE.PointLight(0xffb56b, 0.0, 6.5, 2.0); // warm ~2900K, physical decay
+bulbLight.position.set(0, 1.53, 0);
+bulbLight.castShadow = true;
+bulbLight.shadow.mapSize.set(1024,1024);
+bulbLight.shadow.bias = -0.0018;
+bulbLight.shadow.normalBias = 0.02;
+bulbLight.shadow.camera.near = 0.05;
+bulbLight.shadow.camera.far = 7;
+lamp.add(bulbLight);
+
+/* Soft floor bounce fill, very low, warm — approximates secondary bounce light. */
+const bounceLight = new THREE.PointLight(0xff9a55, 0.0, 5, 2.0);
+bounceLight.position.set(0.3, 0.18, 0.6);
+scene.add(bounceLight);
+
+/* Ambient / hemisphere — keeps the OFF state from ever reading as pure black. Raised
+   from the original pass, which under-lit the room and left the lamp nearly invisible. */
+const hemi = new THREE.HemisphereLight(0x3c4658, 0x141210, 0.9);
+scene.add(hemi);
+const keyDim = new THREE.DirectionalLight(0x9aa4bc, 0.65);
+keyDim.position.set(-3, 4, 2);
+keyDim.castShadow = true;
+keyDim.shadow.mapSize.set(1024,1024);
+keyDim.shadow.camera.left = -3; keyDim.shadow.camera.right = 3;
+keyDim.shadow.camera.top = 3; keyDim.shadow.camera.bottom = -3;
+keyDim.shadow.camera.near = 0.5; keyDim.shadow.camera.far = 10;
+keyDim.shadow.bias = -0.0015;
+scene.add(keyDim);
+
+/* Soft warm gradient "floor pool" beneath the lamp — supplements real lighting per §31,
+   built as a radial-gradient canvas (not a hard-edged circle) blended additively. */
+const poolTex = makeCanvas(256,256,(ctx,w,h)=>{
+  const g = ctx.createRadialGradient(w/2,h/2,0, w/2,h/2,w/2);
+  g.addColorStop(0.0, 'rgba(255,190,120,0.55)');
+  g.addColorStop(0.35,'rgba(255,170,100,0.28)');
+  g.addColorStop(0.7, 'rgba(255,150,90,0.08)');
+  g.addColorStop(1.0, 'rgba(255,150,90,0.0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+});
+const poolMat = new THREE.MeshBasicMaterial({
+  map: poolTex, transparent:true, opacity:0.0, blending: THREE.AdditiveBlending, depthWrite:false,
+});
+const pool = new THREE.Mesh(new THREE.CircleGeometry(1.7, 48), poolMat);
+pool.rotation.x = -Math.PI/2;
+pool.position.set(lamp.position.x, 0.012, lamp.position.z);
+scene.add(pool);
+
+/* Extremely subtle volumetric cone hint — soft alpha falloff, never solid/foggy. */
+const coneMat = new THREE.MeshBasicMaterial({
+  color: 0xffcf9a, transparent:true, opacity:0.0, blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide, depthWrite:false,
+});
+const cone = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.55, 28, 1, true), coneMat);
+cone.position.set(0, 1.55 - 1.55/2 - 0.05, 0);
+lamp.add(cone);
+
+/* ============================== 5. ROPE PHYSICS (Verlet) ============================= */
+
+const ROPE_SEGMENTS   = 16;
+const ROPE_REST_LEN   = 0.85;
+const SEG_LEN         = ROPE_REST_LEN / ROPE_SEGMENTS;
+const ROPE_ANCHOR     = new THREE.Vector3(0, 1.40, 0.06); // local to lamp, under the socket
+const GRAVITY         = -2.4;
+const DAMPING         = 0.985;
+const CONSTRAINT_ITERS= 6;
+const PULL_TRIGGER_DIST = 0.30;      // world units of downward pull that fires the switch
+const PULL_MAX_DIST     = 0.52;      // clamps how far the rope can be dragged
+
+const ropePoints    = [];
+const ropePointsOld = [];
+for (let i = 0; i <= ROPE_SEGMENTS; i++){
+  const y = ROPE_ANCHOR.y - i * SEG_LEN;
+  ropePoints.push(new THREE.Vector3(ROPE_ANCHOR.x, y, ROPE_ANCHOR.z));
+  ropePointsOld.push(new THREE.Vector3(ROPE_ANCHOR.x, y, ROPE_ANCHOR.z));
+}
+const restBottomY = ropePoints[ROPE_SEGMENTS].y;
+
+/* Hand-built tube geometry, reused every frame (no per-frame allocation). */
+const ROPE_SIDES = 6;
+const ropeGeo = new THREE.BufferGeometry();
+const ropeVertCount = (ROPE_SEGMENTS + 1) * ROPE_SIDES;
+const ropePosAttr = new Float32Array(ropeVertCount * 3);
+const ropeUvAttr  = new Float32Array(ropeVertCount * 2);
+const ropeIndices = [];
+for (let i = 0; i < ROPE_SEGMENTS; i++){
+  for (let s = 0; s < ROPE_SIDES; s++){
+    const a = i*ROPE_SIDES + s;
+    const b = i*ROPE_SIDES + (s+1)%ROPE_SIDES;
+    const c = (i+1)*ROPE_SIDES + s;
+    const d = (i+1)*ROPE_SIDES + (s+1)%ROPE_SIDES;
+    ropeIndices.push(a,c,b, b,c,d);
+  }
+}
+for (let i = 0; i <= ROPE_SEGMENTS; i++){
+  for (let s = 0; s < ROPE_SIDES; s++){
+    ropeUvAttr[(i*ROPE_SIDES+s)*2]   = s/ROPE_SIDES;
+    ropeUvAttr[(i*ROPE_SIDES+s)*2+1] = i/ROPE_SEGMENTS;
+  }
+}
+ropeGeo.setAttribute('position', new THREE.BufferAttribute(ropePosAttr, 3));
+ropeGeo.setAttribute('uv', new THREE.BufferAttribute(ropeUvAttr, 2));
+ropeGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(ropeVertCount*3), 3));
+ropeGeo.setIndex(ropeIndices);
+
+const ropeMat = new THREE.MeshStandardMaterial({
+  map: ropeColorMap, roughness: 0.95, metalness: 0.0, color: 0xbdb3a4,
+});
+const ropeMesh = new THREE.Mesh(ropeGeo, ropeMat);
+ropeMesh.castShadow = true;
+lamp.add(ropeMesh);
+
+const ROPE_RADIUS_TOP = 0.0075, ROPE_RADIUS_BOTTOM = 0.0062;
+const _ringTmp = [];
+for (let s = 0; s < ROPE_SIDES; s++) _ringTmp.push(new THREE.Vector3());
+const _UP = new THREE.Vector3(0,1,0);
+const _handleDir = new THREE.Vector3();
+
+function rebuildRopeMesh(){
+  const pos = ropeGeo.attributes.position.array;
+  for (let i = 0; i <= ROPE_SEGMENTS; i++){
+    const p = ropePoints[i];
+    const next = ropePoints[Math.min(i+1, ROPE_SEGMENTS)];
+    const prev = ropePoints[Math.max(i-1, 0)];
+    _v1.subVectors(next, prev);
+    if (_v1.lengthSq() < 1e-8) _v1.set(0,-1,0); else _v1.normalize();
+    // build an orthonormal basis around tangent v1
+    _v2.set(0,1,0);
+    if (Math.abs(_v1.dot(_v2)) > 0.98) _v2.set(1,0,0);
+    _v3.crossVectors(_v1, _v2).normalize();   // right
+    _v2.crossVectors(_v3, _v1).normalize();   // up2
+    const t = i / ROPE_SEGMENTS;
+    const radius = THREE.MathUtils.lerp(ROPE_RADIUS_TOP, ROPE_RADIUS_BOTTOM, t);
+    for (let s = 0; s < ROPE_SIDES; s++){
+      const a = (s / ROPE_SIDES) * Math.PI * 2;
+      const cx = Math.cos(a) * radius, cy = Math.sin(a) * radius;
+      const vx = p.x + _v3.x*cx + _v2.x*cy;
+      const vy = p.y + _v3.y*cx + _v2.y*cy;
+      const vz = p.z + _v3.z*cx + _v2.z*cy;
+      const idx = (i*ROPE_SIDES + s) * 3;
+      pos[idx] = vx; pos[idx+1] = vy; pos[idx+2] = vz;
+    }
+  }
+  ropeGeo.attributes.position.needsUpdate = true;
+  ropeGeo.computeVertexNormals();
+  ropeGeo.computeBoundingSphere(); // keeps hover/grab raycasting accurate as the rope deforms
+}
+
+/* --- Pull handle: small brass cylinder + bead, follows the rope's last point --- */
+const handleGroup = new THREE.Group();
+const handleBody = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.05, 16), brassMat);
+const handleCap  = new THREE.Mesh(new THREE.SphereGeometry(0.021, 16, 12), brassMat);
+handleCap.position.y = 0.03;
+handleGroup.add(handleBody, handleCap);
+handleGroup.traverse(o => { if (o.isMesh){ o.castShadow = true; } });
+lamp.add(handleGroup);
+
+/* invisible, slightly larger hit-target so touch users can grab the handle reliably */
+const handleHit = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.05, 0.05, 0.14, 10),
+  new THREE.MeshBasicMaterial({ visible:false })
+);
+handleGroup.add(handleHit);
+
+function updateRopeVisuals(){
+  rebuildRopeMesh();
+  const end = ropePoints[ROPE_SEGMENTS];
+  const prev = ropePoints[ROPE_SEGMENTS-1];
+  handleGroup.position.copy(end);
+  _handleDir.subVectors(end, prev).normalize().multiplyScalar(-1);
+  handleGroup.quaternion.setFromUnitVectors(_UP, _handleDir);
+}
+
+function verletStep(dt){
+  const anchorWorld = ropePoints[0];
+  anchorWorld.copy(ROPE_ANCHOR);
+  for (let i = 1; i <= ROPE_SEGMENTS; i++){
+    if (interaction.grabbed && i === ROPE_SEGMENTS) continue; // pinned to pointer this frame
+    const p = ropePoints[i], o = ropePointsOld[i];
+    _v1.copy(p).sub(o).multiplyScalar(DAMPING);      // velocity
+    _v2.copy(p).add(_v1);
+    _v2.y += GRAVITY * dt * dt;
+    o.copy(p);
+    p.copy(_v2);
+  }
+  for (let iter = 0; iter < CONSTRAINT_ITERS; iter++){
+    for (let i = 0; i < ROPE_SEGMENTS; i++){
+      const p1 = ropePoints[i], p2 = ropePoints[i+1];
+      _v1.subVectors(p2, p1);
+      const dist = _v1.length() || 0.0001;
+      const diff = (dist - SEG_LEN) / dist;
+      _v1.multiplyScalar(0.5 * diff);
+      if (i === 0){
+        p2.sub(_v1).sub(_v1);
+      } else if (interaction.grabbed && i+1 === ROPE_SEGMENTS){
+        p1.add(_v1).add(_v1);
+      } else {
+        p1.add(_v1);
+        p2.sub(_v1);
+      }
+      // mild horizontal recentring so the rope doesn't drift sideways forever
+      p2.x = THREE.MathUtils.lerp(p2.x, ROPE_ANCHOR.x, 0.002);
+      p2.z = THREE.MathUtils.lerp(p2.z, ROPE_ANCHOR.z, 0.002);
+    }
+    ropePoints[0].copy(ROPE_ANCHOR);
+  }
+}
+
+/* ============================== 6. INTERACTION STATE MACHINE ========================= */
+/*
+   IDLE -> HOVER -> GRABBED -> PULLING -> TRIGGERED -> RELEASING -> SETTLING -> IDLE
+*/
+const interaction = {
+  state: 'IDLE',
+  grabbed: false,
+  hovering: false,
+  pointerDown: false,
+  dragTarget: new THREE.Vector3(),
+  hasTriggeredThisGrab: false,
+  lastPointer: new THREE.Vector2(),
+};
+
+function setState(s){ interaction.state = s; }
+
+function screenToDragTarget(clientX, clientY){
+  _pointerNDC.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  _raycaster.setFromCamera(_pointerNDC, camera);
+  // vertical drag plane, facing the camera, positioned at the rope's rest X/Z (world space)
+  const anchorWorld = _v1.copy(ROPE_ANCHOR).applyMatrix4(lamp.matrixWorld);
+  _plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(_v2).negate(), anchorWorld);
+  const hit = _raycaster.ray.intersectPlane(_plane, _v3);
+  if (!hit) return null;
+  // convert back to lamp-local space for the rope solver
+  const local = lamp.worldToLocal(_v3.clone());
+  const minY = restBottomY - PULL_MAX_DIST;
+  local.y = THREE.MathUtils.clamp(local.y, minY, restBottomY + 0.05);
+  local.x = THREE.MathUtils.clamp(local.x, ROPE_ANCHOR.x - 0.08, ROPE_ANCHOR.x + 0.08);
+  local.z = ROPE_ANCHOR.z;
+  return local;
+}
+
+function pointerRayHitsRope(clientX, clientY){
+  _pointerNDC.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  _raycaster.setFromCamera(_pointerNDC, camera);
+  _raycaster.params.Line.threshold = 0.03;
+  const hits = _raycaster.intersectObjects([handleHit, ropeMesh], false);
+  return hits.length > 0;
+}
+
+function onPointerMove(e){
+  const x = e.touches ? e.touches[0].clientX : e.clientX;
+  const y = e.touches ? e.touches[0].clientY : e.clientY;
+  interaction.lastPointer.set(x,y);
+
+  if (interaction.grabbed){
+    const target = screenToDragTarget(x,y);
+    if (target){
+      // keep the old-position trail current so that on release the verlet solver
+      // derives velocity from the recent drag motion, not the whole grab's travel.
+      ropePointsOld[ROPE_SEGMENTS].copy(ropePoints[ROPE_SEGMENTS]);
+      ropePoints[ROPE_SEGMENTS].copy(target);
+      const pulled = restBottomY - target.y;
+      if (!interaction.hasTriggeredThisGrab && pulled >= PULL_TRIGGER_DIST){
+        interaction.hasTriggeredThisGrab = true;
+        setState('TRIGGERED');
+        fireSwitch();
+      } else {
+        setState('PULLING');
+      }
+    }
+    return;
+  }
+
+  const hit = pointerRayHitsRope(x,y);
+  if (hit && !interaction.hovering){
+    interaction.hovering = true;
+    setState('HOVER');
+    canvas.classList.add('hoverable');
+    gsap.to(handleGroup.scale, { x:1.08, y:1.08, z:1.08, duration:0.25, ease:'power2.out' });
+  } else if (!hit && interaction.hovering){
+    interaction.hovering = false;
+    setState('IDLE');
+    canvas.classList.remove('hoverable');
+    gsap.to(handleGroup.scale, { x:1, y:1, z:1, duration:0.35, ease:'power2.out' });
+  }
+}
+
+function onPointerDown(e){
+  const x = e.touches ? e.touches[0].clientX : e.clientX;
+  const y = e.touches ? e.touches[0].clientY : e.clientY;
+  if (!pointerRayHitsRope(x,y)) return;
+  interaction.grabbed = true;
+  interaction.hasTriggeredThisGrab = false;
+  setState('GRABBED');
+  canvas.classList.add('grabbing');
+  audio.resume();
+}
+
+function onPointerUp(){
+  if (!interaction.grabbed) return;
+  interaction.grabbed = false;
+  canvas.classList.remove('grabbing');
+  setState('RELEASING');
+  // let natural verlet velocity (from ropePointsOld lag) carry the rebound + oscillation
+  setTimeout(() => { if (interaction.state === 'RELEASING') setState('SETTLING'); }, 220);
+  setTimeout(() => { if (interaction.state === 'SETTLING')  setState('IDLE'); }, 1400);
+}
+
+canvas.addEventListener('pointermove', onPointerMove, { passive:true });
+canvas.addEventListener('pointerdown', onPointerDown, { passive:true });
+window.addEventListener('pointerup', onPointerUp, { passive:true });
+canvas.addEventListener('touchmove', (e)=>{ if (interaction.grabbed) e.preventDefault(); }, { passive:false });
+
+/* ============================== 7. LAMP STATE + AUDIO ================================= */
+
+const lampState = { on:false, animating:false };
+
+/* Tiny synthesized mechanical click — no external audio file, respects autoplay policy. */
+const audio = (function(){
+  let ctx = null;
+  function ensure(){ if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); return ctx; }
+  return {
+    resume(){ const c = ensure(); if (c.state === 'suspended') c.resume(); },
+    click(pitch=1){
+      try{
+        const c = ensure();
+        const now = c.currentTime;
+        const osc = c.createOscillator();
+        const gain = c.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(1200*pitch, now);
+        osc.frequency.exponentialRampToValueAtTime(300*pitch, now+0.03);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now+0.07);
+        osc.connect(gain).connect(c.destination);
+        osc.start(now); osc.stop(now+0.08);
+      } catch(e){ /* audio not available — silently skip, never block the experience */ }
+    }
+  };
+})();
+
+/* ============================== 8. LAMP ANIMATION (mechanical + cinematic light) ====== */
+
+let hintShown = false, hintDismissed = false;
+
+function fireSwitch(){
+  if (lampState.animating) return; // ignore re-trigger mid-transition (graceful interruption below still applies to light tween)
+  lampState.animating = true;
+  audio.click(lampState.on ? 0.85 : 1.15);
+
+  // --- mechanical click: quick handle/socket reaction, ~180ms, physical-feeling ease ---
+  gsap.timeline({ onComplete: () => { lampState.animating = false; } })
+    .to(handleGroup.rotation, { z: lampState.on ? 0.18 : -0.22, duration: 0.09, ease:'power2.out' })
+    .to(socket.rotation,      { y: '+=0.10', duration: 0.09, ease:'power2.out' }, '<')
+    .to(handleGroup.rotation, { z: 0, duration: 0.16, ease:'elastic.out(1.1, 0.4)' })
+    .to(socket.rotation,      { y: '-=0.10', duration: 0.16, ease:'elastic.out(1.1,0.4)' }, '<');
+
+  lampState.on = !lampState.on;
+  runLightTimeline(lampState.on);
+  updateStatusUI(lampState.on);
+
+  if (!hintDismissed){
+    hintDismissed = true;
+    document.getElementById('hint').classList.remove('visible');
+  }
+}
+
+let currentLightTween = null;
+
+function runLightTimeline(turningOn){
+  if (currentLightTween) currentLightTween.kill(); // interruptible: reverse cleanly, no conflicting tweens
+
+  const driver = { t: bulbUniforms.uOn.value };
+  const target = turningOn ? 1 : 0;
+
+  currentLightTween = gsap.timeline({
+    defaults: { ease: 'power2.inOut' },
+  });
+
+  // 0.00s bulb starts glowing (emissive ramps first)
+  currentLightTween.to(driver, {
+    t: target, duration: 0.85, ease: 'power2.inOut',
+    onUpdate: () => {
+      bulbUniforms.uOn.value = driver.t;
+      innerLinerMat.emissiveIntensity = driver.t * 1.4;
+      innerLinerMat.emissive.set(0xffb56b);
+      filamentMat.color.setRGB(0.15 + 0.85*driver.t, 0.09 + 0.55*driver.t, 0.03 + 0.25*driver.t);
+    }
+  }, 0);
+
+  // 0.15s point light begins increasing, up to 0.6s stable ON
+  currentLightTween.to(bulbLight, { intensity: turningOn ? 2.6 : 0, duration: 0.6, ease:'power2.inOut' }, 0.15);
+  currentLightTween.to(bounceLight, { intensity: turningOn ? 0.55 : 0, duration: 0.65, ease:'power2.inOut' }, 0.20);
+
+  // 0.30s surrounding illumination becomes visible — floor pool + hemisphere lift + background warmth
+  currentLightTween.to(poolMat, { opacity: turningOn ? 0.85 : 0, duration: 0.7, ease:'power2.inOut' }, 0.30);
+  currentLightTween.to(hemi, { intensity: turningOn ? 1.15 : 0.9, duration: 0.7 }, 0.30);
+  currentLightTween.to(cone.material, { opacity: turningOn ? 0.045 : 0, duration: 0.7 }, 0.30);
+
+  const bgDriver = { t: turningOn ? 0 : 1 };
+  currentLightTween.to(bgDriver, {
+    t: turningOn ? 1 : 0, duration: 0.9, ease:'power2.inOut',
+    onUpdate: () => {
+      _color.copy(bgCool).lerp(bgWarm, bgDriver.t);
+      scene.background.copy(_color);
+      scene.fog.color.copy(_color);
+    }
+  }, 0.25);
+
+  // 0.45s bloom reaches final level -> 0.60s final stable state
+  currentLightTween.to(bloomPass, { strength: turningOn ? 0.62 : 0.18, duration: 0.5, ease:'power2.inOut' }, 0.45);
+}
+
+function updateStatusUI(on){
+  const el = document.getElementById('status');
+  const txt = document.getElementById('statusText');
+  el.classList.toggle('is-on', on);
+  txt.textContent = on ? 'light on' : 'light off';
+}
+
+/* ============================== 9. POST-PROCESSING ===================================== */
+
+let composer, bloomPass, vignettePass;
+
+const VignetteShader = {
+  uniforms: { tDiffuse: { value: null }, uStrength: { value: 0.32 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform float uStrength;
+    varying vec2 vUv;
+    void main(){
+      vec4 texel = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      float vig = 1.0 - smoothstep(0.35, 0.9, length(d)) * uStrength;
+      gl_FragColor = vec4(texel.rgb * vig, texel.a);
+    }
+  `
+};
+
+function buildComposer(){
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.18, 0.55, 0.86);
+  composer.addPass(bloomPass);
+  vignettePass = new ShaderPass(VignetteShader);
+  vignettePass.renderToScreen = true;
+  composer.addPass(vignettePass);
+}
+
+/* ============================== 10. QUALITY / PERFORMANCE TUNING ======================= */
+
+let shadowMapSized = false;
+function applyDeviceQuality(){
+  const narrow = IS_NARROW();
+  // Shadow map resolution is fixed once at first setup — changing a light's shadow
+  // map size after WebGL has allocated its render target requires a manual dispose/
+  // recreate cycle that isn't worth the risk mid-session, so we size it correctly
+  // up front based on the device we detect at load time instead.
+  if (!shadowMapSized){
+    const size = narrow ? 512 : 1024;
+    bulbLight.shadow.mapSize.set(size, size);
+    shadowMapSized = true;
+  }
+  if (bloomPass) bloomPass.resolution.set(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, narrow ? 1.5 : MAX_DPR));
+}
+
+/* ============================== 11. IDLE CAMERA + PARALLAX ============================= */
+
+const clock = new THREE.Clock();
+let mouseNX = 0, mouseNY = 0; // normalized -1..1, for parallax
+window.addEventListener('pointermove', (e) => {
+  mouseNX = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseNY = (e.clientY / window.innerHeight) * 2 - 1;
+}, { passive:true });
+
+function updateCamera(t){
+  const idleX = Math.sin(t*0.15) * THREE.MathUtils.degToRad(0.22);
+  const idleY = Math.cos(t*0.11) * THREE.MathUtils.degToRad(0.15);
+  const parallaxStrength = interaction.grabbed ? 0.02 : 0.06;
+  _v1.copy(CAMERA_BASE_POS);
+  _v1.x += mouseNX * parallaxStrength + idleX;
+  _v1.y += -mouseNY * parallaxStrength * 0.6 + idleY;
+  camera.position.lerp(_v1, 0.06);
+  camera.lookAt(CAMERA_LOOK_AT);
+}
+
+/* ============================== 12. MAIN LOOP =========================================== */
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 1/30);
+  const t = clock.elapsedTime;
+
+  verletStep(dt);
+  updateRopeVisuals();
+  updateCamera(t);
+
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
+}
+
+/* ============================== 13. LOADING SEQUENCE ==================================== */
+/* All assets here are procedural/synchronous, but we still stage a short, honest loading
+   sequence so heavy scene construction (geometry, textures, composer) never blocks paint,
+   and so the interactive scene never appears before it's actually ready. */
+
+const loaderPct = document.getElementById('loaderPct');
+const loaderFill = document.getElementById('loaderFill');
+const loaderCaption = document.getElementById('loaderCaption');
+const loaderEl = document.getElementById('loader');
+
+const steps = [
+  ['building the lamp…', 30],
+  ['weaving the shade fabric…', 55],
+  ['hanging the pull cord…', 75],
+  ['calibrating the light…', 92],
+  ['ready.', 100],
+];
+let stepIndex = 0;
+function tickLoader(){
+  if (stepIndex >= steps.length){
+    finishLoading();
+    return;
+  }
+  const [caption, pct] = steps[stepIndex++];
+  loaderCaption.textContent = caption;
+  loaderPct.textContent = pct + '%';
+  loaderFill.style.width = pct + '%';
+  setTimeout(tickLoader, 220);
+}
+
+function finishLoading(){
+  buildComposer();
+  applyDeviceQuality();
+  updateRopeVisuals();
+  animate();
+  loaderEl.classList.add('hidden');
+  setTimeout(() => {
+    document.getElementById('hint').classList.add('visible');
+    hintShown = true;
+  }, 500);
+}
+
+tickLoader();
+
+} // main()
+</script>
+</body>
+</html>
